@@ -36,6 +36,7 @@ class TrainingMetricsCallback(BaseCallback):
         while self.num_timesteps >= self.next_log_step:
             rewards = [float(item["r"]) for item in self.model.ep_info_buffer] if self.model.ep_info_buffer else []
             lengths = [float(item["l"]) for item in self.model.ep_info_buffer] if self.model.ep_info_buffer else []
+            logger_values = getattr(self.model.logger, "name_to_value", {})
             self.records.append(
                 {
                     "timestep": float(self.next_log_step),
@@ -48,6 +49,7 @@ class TrainingMetricsCallback(BaseCallback):
                     "episode_reward_std": float(np.std(rewards)) if rewards else float("nan"),
                     "episode_length_mean": float(np.mean(lengths)) if lengths else float("nan"),
                     "episode_length_std": float(np.std(lengths)) if lengths else float("nan"),
+                    "train_loss": _float_or_nan(logger_values.get("train/loss")),
                 }
             )
             if self.output_path is not None:

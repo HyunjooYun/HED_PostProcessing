@@ -16,6 +16,14 @@ ALGORITHM_COLORS: dict[str, str] = {
 }
 
 SMOOTHING_FACTOR = 0.7
+TRAINING_PLOT_METRICS = [
+    "episode_reward_mean",
+    "episode_reward_std",
+    "episode_length_mean",
+    "episode_length_std",
+    "train_loss",
+]
+EVAL_PLOT_METRICS = ["reward_mean", "reward_std", "reward_max"]
 
 
 def _get_algorithm_color(algorithm: str | None) -> str:
@@ -140,16 +148,18 @@ def write_compare_metric_plot(records: list[dict[str, float | str]], metric_key:
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.figure(figsize=(8, 4))
     fallback_palette = ["#33658A", "#F26419", "#55D6BE", "#2F4858"]
+    plotted_labels = 0
     for index, (algorithm, items) in enumerate(sorted(grouped.items())):
         x_values, y_values = _sanitize_series(items, "timestep", metric_key)
         if len(x_values) == 0:
             continue
         color = ALGORITHM_COLORS.get(algorithm.lower(), fallback_palette[index % len(fallback_palette)])
         plt.plot(x_values, _smooth_series(y_values), linewidth=2, color=color, label=algorithm.upper())
+        plotted_labels += 1
     plt.xlabel("timestep")
     plt.ylabel(metric_key)
     plt.title(title)
-    if grouped:
+    if plotted_labels > 0:
         plt.legend()
     plt.tight_layout()
     plt.savefig(path)
@@ -185,11 +195,19 @@ def write_stability_plots(algorithm: str, records: list[dict[str, float | str]],
         )
 
 
-def write_training_plots(records: list[dict[str, float | str]], output_dir: Path) -> None:
-    for metric_name in ["episode_reward_mean", "episode_reward_std", "episode_length_mean", "episode_length_std"]:
-        write_compare_metric_plot(records, metric_name, output_dir / f"training_{metric_name}.png", title=f"Training {metric_name}")
+def write_training_plots(records: list[dict[str, float | str]], output_dir: Path) -> list[Path]:
+    generated_paths: list[Path] = []
+    for metric_name in TRAINING_PLOT_METRICS:
+        output_path = output_dir / f"training_{metric_name}.png"
+        write_compare_metric_plot(records, metric_name, output_path, title=f"Training {metric_name}")
+        generated_paths.append(output_path)
+    return generated_paths
 
 
-def write_eval_plots(records: list[dict[str, float | str]], output_dir: Path) -> None:
-    for metric_name in ["reward_mean", "reward_std", "reward_max"]:
-        write_compare_metric_plot(records, metric_name, output_dir / f"eval_compare_{metric_name}.png", title=f"Eval {metric_name}")
+def write_eval_plots(records: list[dict[str, float | str]], output_dir: Path) -> list[Path]:
+    generated_paths: list[Path] = []
+    for metric_name in EVAL_PLOT_METRICS:
+        output_path = output_dir / f"eval_compare_{metric_name}.png"
+        write_compare_metric_plot(records, metric_name, output_path, title=f"Eval {metric_name}")
+        generated_paths.append(output_path)
+    return generated_paths

@@ -27,6 +27,14 @@ class ParameterState:
             self.nms_strength,
         ]
 
+    def to_dict(self) -> dict[str, float | int]:
+        return {
+            "threshold": self.threshold,
+            "blur_sigma": self.blur_sigma,
+            "morphology_radius": self.morphology_radius,
+            "nms_strength": self.nms_strength,
+        }
+
 
 @dataclass(slots=True)
 class PostProcessConfig:

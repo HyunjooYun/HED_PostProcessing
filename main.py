@@ -29,6 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--algorithm", required=True, choices=["dqn", "ppo"])
     train.add_argument("--timesteps", type=int, default=200_000)
     train.add_argument("--run-name", default=None)
+    train.add_argument("--seed", type=int, default=42)
 
     evaluate = subparsers.add_parser("evaluate-model", help="Evaluate a trained DQN or PPO model on a dataset split")
     evaluate.add_argument("--model-path", required=True)
@@ -77,7 +78,7 @@ def run_baseline(args: argparse.Namespace) -> None:
 
 
 def run_training(args: argparse.Namespace) -> None:
-    config = ExperimentConfig(train_timesteps=args.timesteps)
+    config = ExperimentConfig(train_timesteps=args.timesteps, seed=args.seed)
     run_name = args.run_name or f"{args.algorithm}_{args.timesteps}"
     run_dir = train_model(args.algorithm, config, PostProcessConfig(), run_name)
     print(run_dir)
@@ -176,17 +177,21 @@ def run_compare_runs(args: argparse.Namespace) -> None:
     ppo_training = read_metric_records_csv(ppo_run_dir / "csv_logs" / "training_metrics.csv")
     merged_training = merge_metric_records(dqn_training, ppo_training)
     write_metric_records_csv(merged_training, output_dir / "training_metrics.csv")
-    write_training_plots(merged_training, output_dir)
+    training_plot_paths = write_training_plots(merged_training, output_dir)
 
     dqn_eval = read_metric_records_csv(dqn_run_dir / "csv_logs" / "eval_compare_metrics.csv")
     ppo_eval = read_metric_records_csv(ppo_run_dir / "csv_logs" / "eval_compare_metrics.csv")
     merged_eval = merge_metric_records(dqn_eval, ppo_eval)
     write_metric_records_csv(merged_eval, output_dir / "eval_compare_metrics.csv")
-    write_eval_plots(merged_eval, output_dir)
+    eval_plot_paths = write_eval_plots(merged_eval, output_dir)
 
     payload = {
+        "dqn_run_dir": str(dqn_run_dir),
+        "ppo_run_dir": str(ppo_run_dir),
         "training_metrics": str(output_dir / "training_metrics.csv"),
         "eval_compare_metrics": str(output_dir / "eval_compare_metrics.csv"),
+        "training_plots": [str(path) for path in training_plot_paths],
+        "eval_plots": [str(path) for path in eval_plot_paths],
     }
     print(json.dumps(payload, indent=2))
 

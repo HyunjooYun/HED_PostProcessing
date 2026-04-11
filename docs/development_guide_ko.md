@@ -634,6 +634,12 @@ CSV, JSON, PNG 요약 리포트를 저장한다.
 
 문서 기준으로는 DQN과 PPO 학습 후 아래 산출물을 추가 생성한다.
 
+비교 그래프는 아래 명령으로 한 번에 다시 생성할 수 있다.
+
+```powershell
+& ".venv/Scripts/python.exe" .\main.py compare-runs --dqn-run-dir runs\dqn_sqrt8 --ppo-run-dir runs\ppo_sqrt8 --output-dir runs\sqrt8_compare
+```
+
 - DQN 안정성 그래프 PNG 6종 및 대응 CSV
 - PPO 안정성 그래프 PNG 5종 및 대응 CSV
 - 학습 과정 비교 그래프 PNG 4종 및 대응 CSV

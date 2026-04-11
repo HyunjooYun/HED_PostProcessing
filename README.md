@@ -63,6 +63,14 @@ Export 10 sample images from a trained model:
 & ".venv/Scripts/python.exe" .\main.py export-samples --model-path runs\dqn_main\dqn_final.zip --split test --num-samples 10 --output-dir runs\dqn_main\samples
 ```
 
+Generate shared DQN/PPO comparison graphs for the same metrics:
+
+```powershell
+& ".venv/Scripts/python.exe" .\main.py compare-runs --dqn-run-dir runs\dqn_sqrt8 --ppo-run-dir runs\ppo_sqrt8 --output-dir runs\sqrt8_compare
+```
+
+This writes merged CSV logs plus one-figure comparison plots such as `training_episode_reward_mean.png` and `eval_compare_reward_mean.png` into the output directory.
+
 Launch TensorBoard:
 
 ```powershell

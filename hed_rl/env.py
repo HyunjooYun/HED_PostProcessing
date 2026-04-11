@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from dataclasses import dataclass
 
 import gymnasium as gym
@@ -23,6 +22,17 @@ class StepMetrics:
     boundary_recall: float
     boundary_f1: float
     iou: float
+
+    def to_dict(self) -> dict[str, float]:
+        return {
+            "precision": self.precision,
+            "recall": self.recall,
+            "f1": self.f1,
+            "boundary_precision": self.boundary_precision,
+            "boundary_recall": self.boundary_recall,
+            "boundary_f1": self.boundary_f1,
+            "iou": self.iou,
+        }
 
 
 class HEDEdgeEnv(gym.Env[np.ndarray, int]):
@@ -84,8 +94,8 @@ class HEDEdgeEnv(gym.Env[np.ndarray, int]):
         metrics = self._evaluate()
         info = {
             "sample_id": self._sample.sample_id,
-            "metrics": asdict(metrics),
-            "params": asdict(self._params),
+            "metrics": metrics.to_dict(),
+            "params": self._params.to_dict(),
         }
         return self._observe(), info
 
@@ -101,8 +111,8 @@ class HEDEdgeEnv(gym.Env[np.ndarray, int]):
         info = {
             "sample_id": self._sample.sample_id,
             "action_name": action_name,
-            "metrics": asdict(metrics),
-            "params": asdict(self._params),
+            "metrics": metrics.to_dict(),
+            "params": self._params.to_dict(),
         }
         return self._observe(), metrics.boundary_f1, terminated, truncated, info
 
