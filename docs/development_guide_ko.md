@@ -11,6 +11,23 @@
 - 기획서 요구사항을 코드 구조와 실행 절차로 번역한다.
 - 현재 구현 범위와 미구현 범위를 명확히 구분한다.
 
+## 1.1 최근 업데이트 요약
+
+최근 업데이트에서 반영된 핵심 사항은 다음과 같다.
+
+- DQN 안정성 로그에 `q_max`를 추가했다.
+- seed `486` 기준 DQN, PPO `200,000 timesteps` 재학습을 수행했다.
+- DQN/PPO 공통 학습 그래프와 HED 대비 binary F1, boundary F1, IoU 비교 그래프를 생성했다.
+- all-seed 집계 파일과 논문용 요약 문서를 갱신했다.
+
+주요 산출물은 아래 경로에 저장되어 있다.
+
+- `runs/dqn_seed486_sqrt8/plots/dqn_stability_q_max.png`
+- `runs/seed486_compare/`
+- `runs/all_seed_test_summary.csv`
+- `runs/all_seed_test_summary.md`
+- `runs/paper_seed486_summary.md`
+
 ## 2. 프로젝트 목표
 
 1차 목표는 HED edge map에서 ODS 기반 단일 threshold를 추정해 안정적인 binary edge map을 생성하는 모듈을 구축하는 것이다.
@@ -22,6 +39,24 @@
 - ODS 기반 binary edge map의 baseline 품질
 - 학습 안정성
 - 이미지별 후처리 성능
+
+현재 최신 비교 기준에는 seed `486` 실험 결과도 포함된다.
+
+### 2.1 seed 486 최신 결과
+
+test split 기준 최신 성능 요약은 다음과 같다.
+
+| 방법 | reward_mean | binary F1 mean | boundary F1 mean | IoU mean |
+| --- | ---: | ---: | ---: | ---: |
+| HED baseline | 0.0000 | 0.4117 | 0.7551 | 0.2614 |
+| DQN seed 486 | 22.5252 | 0.4088 | 0.7515 | 0.2591 |
+| PPO seed 486 | 22.3334 | 0.3901 | 0.7262 | 0.2445 |
+
+해석은 다음과 같다.
+
+- DQN은 binary F1, boundary F1, IoU 모두에서 HED baseline에 근접했다.
+- PPO는 seed 486 기준으로 DQN과 HED보다 낮은 성능을 보였다.
+- boundary F1 기준으로는 DQN이 PPO보다 높았지만, HED baseline을 넘지는 못했다.
 <!-- 
 - 고정 threshold 방식 대비 개선 여부
 - GT 기준 F1, IoU, boundary-aware F1 성능
@@ -208,6 +243,13 @@ $$
 - 추출 결과는 CSV 파일로 저장한다.
 - CSV에는 최소한 timestep, reward 또는 평가 metric, 주요 파라미터 또는 validation 요약값이 포함되도록 설계한다.
 
+현재 구현에서 알고리즘별 안정성 로그는 아래와 같다.
+
+- DQN: `q_mean`, `q_max`, `q_std`, `td_error_mean`, `td_error_std`, `td_error_abs_mean`, `exploration_rate`
+- PPO: `explained_variance`, `approx_kl`, `clip_fraction`, `value_loss`, `entropy_loss`
+
+즉, 최신 DQN 실험에서는 값 함수의 평균 스케일뿐 아니라 최대값 스케일도 `q_max`로 직접 추적할 수 있다.
+
 ### 4.2 상태(State)
 
 입력 이미지 및 현재 파라메터 세팅(Threshold, Blur σ, NMS 강도, Morphology Kernel 등).
@@ -310,6 +352,14 @@ BPR 기반 F1을 중심 보상으로 제시한다.
 - 픽셀 단위 F1보다 위치 오차 허용이 가능한 지표를 유지하기 위함
 
 현재 보상은 `boundary_f1_score()` 반환값이다.
+
+논문 또는 보고서에서 학습 안정성 설명에 사용할 수 있는 대표 그래프는 다음과 같다.
+
+- DQN `q_max` 변화: `runs/dqn_seed486_sqrt8/plots/dqn_stability_q_max.png`
+- DQN/PPO 공통 validation reward 비교: `runs/seed486_compare/eval_compare_reward_mean.png`
+- HED, DQN, PPO test boundary F1 비교: `runs/seed486_compare/test_compare_boundary_f1.png`
+- HED, DQN, PPO test binary F1 비교: `runs/seed486_compare/test_compare_binary_f1.png`
+- HED, DQN, PPO test IoU 비교: `runs/seed486_compare/test_compare_iou.png`
 
 ## 5. 현재 시스템 구조
 

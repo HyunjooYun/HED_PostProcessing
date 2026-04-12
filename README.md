@@ -36,6 +36,30 @@ The current virtual environment already works with the required packages in `req
 ## Documentation
 
 - Korean development guide: `docs/development_guide_ko.md`
+- Release-note summary for the latest experiment update: `docs/release_note_seed486.md`
+
+## Latest update
+
+- Added DQN `q_max` logging and plot export alongside the existing DQN stability metrics.
+- Trained additional seed-486 runs for both DQN and PPO with `200,000` timesteps.
+- Exported shared DQN/PPO comparison plots under `runs/seed486_compare`.
+- Updated all-seed aggregate summaries under `runs/all_seed_test_summary.csv` and `runs/all_seed_test_summary.md`.
+
+## Seed 486 snapshot
+
+Test-set summary for the latest seed-486 runs:
+
+| method | reward_mean | binary_f1_mean | boundary_f1_mean | iou_mean |
+| --- | ---: | ---: | ---: | ---: |
+| HED baseline | 0.0000 | 0.4117 | 0.7551 | 0.2614 |
+| DQN seed 486 | 22.5252 | 0.4088 | 0.7515 | 0.2591 |
+| PPO seed 486 | 22.3334 | 0.3901 | 0.7262 | 0.2445 |
+
+Relevant artifacts:
+
+- DQN stability plot with Q-max: `runs/dqn_seed486_sqrt8/plots/dqn_stability_q_max.png`
+- Shared training and evaluation plots: `runs/seed486_compare/`
+- Paper-ready summary: `runs/paper_seed486_summary.md`
 
 ## Commands
 
