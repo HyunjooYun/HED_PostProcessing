@@ -170,6 +170,7 @@ def write_stability_plots(algorithm: str, records: list[dict[str, float | str]],
     metric_names = {
         "dqn": [
             "q_mean",
+            "q_max",
             "q_std",
             "td_error_mean",
             "td_error_std",

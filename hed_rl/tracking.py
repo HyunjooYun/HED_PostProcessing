@@ -76,6 +76,7 @@ class DQNStabilityCallback(BaseCallback):
                 "timestep": float(self.next_log_step),
                 "algorithm": "dqn",
                 "q_mean": float("nan"),
+                "q_max": float("nan"),
                 "q_std": float("nan"),
                 "td_error_mean": float("nan"),
                 "td_error_std": float("nan"),
@@ -98,6 +99,7 @@ class DQNStabilityCallback(BaseCallback):
                 record.update(
                     {
                         "q_mean": float(q_values_all.mean().item()),
+                        "q_max": float(q_values_all.max().item()),
                         "q_std": float(q_values_all.std(unbiased=False).item()),
                         "td_error_mean": float(td_error.mean().item()),
                         "td_error_std": float(td_error.std(unbiased=False).item()),
