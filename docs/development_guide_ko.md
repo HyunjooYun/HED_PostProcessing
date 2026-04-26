@@ -236,6 +236,50 @@ $$
 - reward는 step마다 계산되는 boundary-aware F1 값이다.
 - episode 종료 조건은 `boundary_f1 >= 0.98` 또는 최대 step 도달이다.
 
+현재 구현의 step/action 루프는 아래와 같다.
+
+```mermaid
+flowchart TD
+  START["Episode ongoing"] --> STATE["State observation s_t\n10-dim normalized feature vector"]
+  STATE --> AGENT["Agent\nDQN or PPO"]
+  AGENT --> ACTION["Discrete action a_t\n9 actions"]
+
+  ACTION --> DELTA{"Action type"}
+  DELTA -->|threshold_up/down| P1["threshold ± 0.05"]
+  DELTA -->|blur_up/down| P2["blur sigma ± 0.2"]
+  DELTA -->|morphology_up/down| P3["morphology radius ± 1"]
+  DELTA -->|nms_up/down| P4["nms strength ± 0.1"]
+  DELTA -->|noop| P5["no parameter change"]
+
+  P1 --> CLIP["ParameterState.clip()\nvalid range enforcement"]
+  P2 --> CLIP
+  P3 --> CLIP
+  P4 --> CLIP
+  P5 --> CLIP
+
+  CLIP --> POST["run_postprocess(hed, params)\nGaussian blur -> threshold -> morphology -> NMS-like -> binary map"]
+  POST --> METRIC["Evaluate with GT\nprecision, recall, f1, boundary_f1, iou"]
+  METRIC --> REWARD["Reward r_t = boundary_f1"]
+  REWARD --> CHECK{"Termination check"}
+
+  CHECK -->|Yes: boundary_f1 >= 0.98\nor step >= 30| END["End episode"]
+  CHECK -->|No| NEXT["Return next observation\nstep_ratio updated"]
+  NEXT --> STATE
+```
+
+위 다이어그램에서 상태 벡터는 아래 항목으로 구성된다.
+
+- `hed_density`
+- `processed_edge_density`
+- `continuity_horizontal`
+- `continuity_vertical`
+- `noise_level`
+- `step_ratio`
+- 정규화된 `threshold`
+- 정규화된 `blur_sigma`
+- 정규화된 `morphology_radius`
+- 정규화된 `nms_strength`
+
 학습 로그 정책은 다음과 같이 정의한다.
 
 - 총 학습 구간 `200,000 timesteps` 동안 중간 출력 데이터를 기록한다.
@@ -342,8 +386,11 @@ $$
 
 ### 4.4 보상(Reward)
 
-Ground Truth 에지 맵과 비교한 정량 지표
-BPR 기반 F1을 중심 보상으로 제시한다.
+보상 함수는 에이전트가 생성한 후처리 결과 binary edge map과 Ground Truth 에지 맵 사이의 일치도를 기준으로 계산한다.
+
+구체적으로는 각 step에서 생성된 에지 맵을 GT 맵과 비교하여 `precision`, `recall`, `f1`, `boundary_f1`, `iou`를 산출하며, 이 중 `boundary_f1` 값을 reward로 사용한다.
+
+즉, 현재 구현의 보상은 정식 BPR(Boundary Precision-Recall) 기반 F1을 직접 계산하는 방식이 아니라, 허용 반경 내 경계 일치를 기준으로 precision과 recall을 계산한 뒤 이를 종합한 boundary-aware F1 score를 사용하는 방식이다. 따라서 step `t`에서의 reward 반환값 `r_t`는 현재 후처리 결과에 대한 boundary-aware F1 score로 정의된다.
 
 현재 구현은 아래 이유로 완전한 BPR 대신 boundary-aware F1 근사를 사용한다.
 
@@ -363,13 +410,73 @@ BPR 기반 F1을 중심 보상으로 제시한다.
 
 ## 5. 현재 시스템 구조
 
-입력 이미지 로딩
-HED 모델 추론 또는 저장된 HED map 로딩
-ODS threshold 탐색 모듈 실행
-ODS 기반 binary edge map 생성
-이후 확장 단계에서 RL 에이전트(DQN 또는 PPO)가 추가 후처리 파라메터를 조정
-결과 에지 맵과 GT를 비교해 보상 계산
-수렴 시 최적 파라메터 조합 및 성능 리포트 생성
+현재 버전의 실제 구조는 아래와 같다.
+
+- 저장소 내부에서 Caffe 기반 HED 추론을 수행하지 않는다.
+- 이미 생성된 `images`, `HED_map`, `GT_map` 쌍을 로드한다.
+- ODS baseline 경로와 RL 환경 경로가 같은 입력 데이터를 공유한다.
+- RL 환경은 `reset()` 시 샘플을 선택하고, `step()` 마다 후처리 파라미터를 갱신한다.
+
+```mermaid
+flowchart TD
+  subgraph Inputs["1. 입력 데이터 로드"]
+    IMG["inputs/images/{split}/*.jpg"]
+    HED["inputs/HED_map/{split}/*_edge.png"]
+    GT["inputs/GT_map/{split}/*_gt.png"]
+    DATA["DatasetIndex\n샘플 매칭 및 로드"]
+    IMG --> DATA
+    HED --> DATA
+    GT --> DATA
+  end
+
+  subgraph ODS["2. ODS Baseline 경로"]
+    GRID["threshold grid\n0.05 ~ 1.00 step 0.05"]
+    SWEEP["validation split sweep\nhed >= threshold"]
+    SELECT["best threshold 선택\nargmax mean boundary_f1"]
+    EXPORT["train/val/test export\nrows.csv, summary.json, maps/*.png"]
+    GRID --> SWEEP --> SELECT --> EXPORT
+  end
+
+  subgraph RL["3. RL 환경 경로"]
+    RESET["env.reset()\n다음 sample 선택\n초기 params 설정"]
+    POST0["run_postprocess()\nblur -> threshold -> morphology -> NMS-like"]
+    OBS0["observation encoding\n10-dim feature vector"]
+    AGENT["DQN / PPO\n9개 discrete actions"]
+    STEP["env.step(action)\nparams update + clip"]
+    POST1["run_postprocess() 재실행"]
+    REWARD["GT와 비교\nboundary_f1 reward"]
+    DONE["종료 조건\nboundary_f1 >= 0.98\n또는 max step 30"]
+    RESET --> POST0 --> OBS0 --> AGENT --> STEP --> POST1 --> REWARD --> DONE
+    REWARD --> OBS0
+  end
+
+  subgraph State["4. Observation 구성"]
+    F1["hed density"]
+    F2["processed edge density"]
+    F3["horizontal continuity"]
+    F4["vertical continuity"]
+    F5["noise level\n|processed - hed|"]
+    F6["step ratio"]
+    F7["normalized threshold"]
+    F8["normalized blur sigma"]
+    F9["normalized morphology radius"]
+    F10["normalized nms strength"]
+  end
+
+  DATA --> SWEEP
+  DATA --> RESET
+  SELECT --> EXPORT
+  POST0 -. feature source .-> State
+  POST1 -. feature source .-> State
+  State --> OBS0
+```
+
+이 다이어그램은 현재 구현을 기준으로 다음 사실을 반영한다.
+
+- HED 모델 추론은 외부에서 끝난 것으로 간주하고, 저장소는 결과 맵을 입력으로 사용한다.
+- ODS는 raw HED map에 threshold만 적용하는 baseline 경로다.
+- RL은 ODS 결과를 다시 입력으로 받지 않고, 원본 HED map에서 직접 후처리를 반복 적용한다.
+- observation에는 `target parameter` 나 `user vs target difference` 같은 항목이 없고, 현재는 통계 feature 6개와 파라미터 feature 4개만 사용한다.
 
 ```text
 main.py
