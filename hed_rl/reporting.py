@@ -69,9 +69,63 @@ def write_policy_rows_csv(rows: list[PolicyEvaluationRow], path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as handle:
         writer = csv.writer(handle)
-        writer.writerow(["sample_id", "reward", "steps", "precision", "recall", "f1", "boundary_f1", "iou"])
+        writer.writerow(
+            [
+                "sample_id",
+                "reward",
+                "steps",
+                "threshold_initial",
+                "threshold_final",
+                "threshold_mean",
+                "threshold_std",
+                "blur_sigma_initial",
+                "blur_sigma_final",
+                "blur_sigma_mean",
+                "blur_sigma_std",
+                "morphology_radius_initial",
+                "morphology_radius_final",
+                "morphology_radius_mean",
+                "morphology_radius_std",
+                "nms_strength_initial",
+                "nms_strength_final",
+                "nms_strength_mean",
+                "nms_strength_std",
+                "precision",
+                "recall",
+                "f1",
+                "boundary_f1",
+                "iou",
+            ]
+        )
         for row in rows:
-            writer.writerow([row.sample_id, row.reward, row.steps, row.precision, row.recall, row.f1, row.boundary_f1, row.iou])
+            writer.writerow(
+                [
+                    row.sample_id,
+                    row.reward,
+                    row.steps,
+                    row.threshold_initial,
+                    row.threshold_final,
+                    row.threshold_mean,
+                    row.threshold_std,
+                    row.blur_sigma_initial,
+                    row.blur_sigma_final,
+                    row.blur_sigma_mean,
+                    row.blur_sigma_std,
+                    row.morphology_radius_initial,
+                    row.morphology_radius_final,
+                    row.morphology_radius_mean,
+                    row.morphology_radius_std,
+                    row.nms_strength_initial,
+                    row.nms_strength_final,
+                    row.nms_strength_mean,
+                    row.nms_strength_std,
+                    row.precision,
+                    row.recall,
+                    row.f1,
+                    row.boundary_f1,
+                    row.iou,
+                ]
+            )
 
 
 def write_metric_records_csv(records: list[dict[str, float | str]], path: Path) -> None:

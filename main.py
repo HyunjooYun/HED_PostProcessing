@@ -8,7 +8,9 @@ from hed_rl.config import ExperimentConfig, ParameterState, PostProcessConfig
 from hed_rl.data import DatasetIndex
 from hed_rl.evaluation import evaluate_fixed_threshold, evaluate_policy_model, summarize_policy_rows, summarize_rows
 from hed_rl.inference import export_policy_samples
+from hed_rl.ois import export_ois_binary_maps, summarize_ois_thresholds, write_ois_thresholds_csv
 from hed_rl.ods import build_threshold_grid, export_ods_binary_maps, select_ods_threshold, write_export_manifest, write_ods_sweep_csv
+from hed_rl.otsu import export_otsu_binary_maps, summarize_otsu_thresholds, write_otsu_thresholds_csv
 from hed_rl.reporting import read_metric_records_csv, write_compare_metric_plot, write_eval_plots, write_metric_records_csv, write_policy_rows_csv, write_rows_csv, write_summary_plot, write_training_plots, merge_metric_records
 from hed_rl.training import train_model
 
@@ -54,6 +56,17 @@ def build_parser() -> argparse.ArgumentParser:
     ods.add_argument("--threshold-stop", type=float, default=1.0)
     ods.add_argument("--threshold-step", type=float, default=0.05)
     ods.add_argument("--output-dir", default="runs/ods_binary_maps")
+
+    ois = subparsers.add_parser("export-ois-binary", help="Select a per-image optimal threshold with GT and export OIS binary edge maps")
+    ois.add_argument("--target-splits", nargs="+", default=["train", "val", "test"], choices=["train", "val", "test"])
+    ois.add_argument("--threshold-start", type=float, default=0.05)
+    ois.add_argument("--threshold-stop", type=float, default=1.0)
+    ois.add_argument("--threshold-step", type=float, default=0.05)
+    ois.add_argument("--output-dir", default="runs/ois_binary_maps")
+
+    otsu = subparsers.add_parser("export-otsu-binary", help="Apply per-image Otsu thresholding and export binary edge maps")
+    otsu.add_argument("--target-splits", nargs="+", default=["train", "val", "test"], choices=["train", "val", "test"])
+    otsu.add_argument("--output-dir", default="runs/otsu_binary_maps")
 
     return parser
 
@@ -153,10 +166,82 @@ def run_export_ods_binary(args: argparse.Namespace) -> None:
     print(json.dumps(export_payload, indent=2))
 
 
+def run_export_ois_binary(args: argparse.Namespace) -> None:
+    config = ExperimentConfig()
+    threshold_values = build_threshold_grid(args.threshold_start, args.threshold_stop, args.threshold_step)
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    export_payload: dict[str, object] = {
+        "target_splits": list(args.target_splits),
+        "threshold_start": args.threshold_start,
+        "threshold_stop": args.threshold_stop,
+        "threshold_step": args.threshold_step,
+        "splits": {},
+    }
+
+    for split in args.target_splits:
+        dataset = DatasetIndex(config.inputs_dir, split)
+        split_dir = output_dir / split
+        export_result = export_ois_binary_maps(dataset, threshold_values, split_dir)
+        threshold_summary = summarize_ois_thresholds(export_result.sample_results)
+
+        write_rows_csv(export_result.rows, split_dir / "rows.csv")
+        write_ois_thresholds_csv(export_result.sample_results, split_dir / "ois_thresholds.csv")
+        write_export_manifest(export_result.manifest_rows, split_dir / "manifest.csv")
+        write_summary_plot(export_result.summary, split_dir / "summary.png", title=f"OIS binary {split}")
+        (split_dir / "summary.json").write_text(json.dumps(export_result.summary, indent=2), encoding="utf-8")
+        (split_dir / "threshold_summary.json").write_text(json.dumps(threshold_summary, indent=2), encoding="utf-8")
+
+        export_payload["splits"][split] = {
+            "count": len(export_result.rows),
+            "summary": export_result.summary,
+            "threshold_summary": threshold_summary,
+            "manifest": str(split_dir / "manifest.csv"),
+            "ois_thresholds": str(split_dir / "ois_thresholds.csv"),
+        }
+
+    print(json.dumps(export_payload, indent=2))
+
+
+def run_export_otsu_binary(args: argparse.Namespace) -> None:
+    config = ExperimentConfig()
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    export_payload: dict[str, object] = {
+        "target_splits": list(args.target_splits),
+        "splits": {},
+    }
+
+    for split in args.target_splits:
+        dataset = DatasetIndex(config.inputs_dir, split)
+        split_dir = output_dir / split
+        export_result = export_otsu_binary_maps(dataset, split_dir)
+        threshold_summary = summarize_otsu_thresholds(export_result.sample_results)
+
+        write_rows_csv(export_result.rows, split_dir / "rows.csv")
+        write_otsu_thresholds_csv(export_result.sample_results, split_dir / "otsu_thresholds.csv")
+        write_export_manifest(export_result.manifest_rows, split_dir / "manifest.csv")
+        write_summary_plot(export_result.summary, split_dir / "summary.png", title=f"Otsu binary {split}")
+        (split_dir / "summary.json").write_text(json.dumps(export_result.summary, indent=2), encoding="utf-8")
+        (split_dir / "threshold_summary.json").write_text(json.dumps(threshold_summary, indent=2), encoding="utf-8")
+
+        export_payload["splits"][split] = {
+            "count": len(export_result.rows),
+            "summary": export_result.summary,
+            "threshold_summary": threshold_summary,
+            "manifest": str(split_dir / "manifest.csv"),
+            "otsu_thresholds": str(split_dir / "otsu_thresholds.csv"),
+        }
+
+    print(json.dumps(export_payload, indent=2))
+
+
 def run_evaluate_model(args: argparse.Namespace) -> None:
     config = ExperimentConfig()
     dataset = DatasetIndex(config.inputs_dir, args.split)
-    rows = evaluate_policy_model(Path(args.model_path), dataset, PostProcessConfig())
+    rows = evaluate_policy_model(Path(args.model_path), dataset, PostProcessConfig(), progress_every=10)
     summary = summarize_policy_rows(rows)
 
     output_dir = Path(args.output_dir)
@@ -207,6 +292,10 @@ def main() -> None:
         run_export_samples(args)
     elif args.command == "export-ods-binary":
         run_export_ods_binary(args)
+    elif args.command == "export-ois-binary":
+        run_export_ois_binary(args)
+    elif args.command == "export-otsu-binary":
+        run_export_otsu_binary(args)
     elif args.command == "evaluate-model":
         run_evaluate_model(args)
     elif args.command == "compare-runs":

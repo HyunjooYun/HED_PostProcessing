@@ -220,6 +220,60 @@ $$
 
 "본 연구는 HED가 생성한 edge score map을 binary edge map으로 변환하기 위해 ODS 기반 thresholding을 사용하였다. ODS threshold는 validation split에서 threshold sweep을 수행하여 평균 boundary-aware F1을 최대화하는 단일 threshold로 선택하였으며, 선택된 threshold를 target split 전체에 동일하게 적용하였다. 이를 통해 데이터셋 수준에서 일관된 이진화 기준선을 확보하고, 이후 강화학습 기반 후처리 결과와 비교 가능한 baseline을 구성하였다."
 
+#### 4.0.8 OIS 정의와 역할
+
+OIS는 Optimal Image Scale의 약자로, 각 이미지마다 ground truth를 기준으로 가장 성능이 좋은 threshold를 개별적으로 선택한 뒤 그 성능을 평균한 값이다. 본 프로젝트에서는 ODS와 동일하게 boundary-aware F1을 기준 metric으로 사용하며, 각 샘플 $i$ 에 대해 다음과 같이 정의할 수 있다.
+
+$$
+t_i^* = \arg\max_{t \in \mathcal{T}} \mathrm{BF1}(B_i(t), G_i)
+$$
+
+$$
+\mathrm{OIS} = \frac{1}{N} \sum_{i=1}^{N} \max_{t \in \mathcal{T}} \mathrm{BF1}(B_i(t), G_i)
+$$
+
+여기서 $B_i(t)$ 는 $i$번째 HED map에 threshold $t$ 를 적용한 binary edge map, $G_i$ 는 해당 ground-truth edge map, $\mathcal{T}$ 는 threshold 후보 집합이다. OIS는 test 시점에 각 이미지의 GT를 사용해 threshold를 고르는 oracle 값이므로, 실사용 baseline이라기보다 sample-wise tuning이 도달할 수 있는 상한선으로 해석해야 한다.
+
+현재 구현은 `main.py export-ois-binary` CLI를 통해 train, val, test split별 OIS binary map을 생성하며, 결과는 `runs/ois_binary_maps/` 아래에 저장된다. 각 split 폴더에는 다음 산출물이 기록된다.
+
+- `maps/*.png`: 샘플별 OIS binary edge map
+- `rows.csv`: 샘플별 precision, recall, F1, boundary-aware F1, IoU
+- `ois_thresholds.csv`: 샘플별 optimal threshold와 성능
+- `summary.json`: split 평균 metric
+- `threshold_summary.json`: threshold mean, std, min, max 및 OIS boundary F1 통계
+
+#### 4.0.9 ODS, OIS, DQN, PPO 비교 원칙
+
+논문에서는 ODS, Otsu, OIS, DQN, PPO를 한 표에 나열할 수 있으나, 이 다섯 방법을 동일 계층의 baseline으로 해석해서는 안 된다. 권장 비교 구조는 다음과 같다.
+
+- ODS: dataset-level 단일 threshold를 사용하는 practical non-learned baseline
+- Otsu: GT 없이 각 이미지의 intensity histogram만으로 threshold를 정하는 per-image deterministic baseline
+- OIS: per-image optimal threshold를 사용하는 GT-aware oracle upper bound
+- DQN: GT 없이 adaptive post-processing을 수행하는 learned method
+- PPO: GT 없이 adaptive post-processing을 수행하는 learned method
+
+따라서 주 비교표는 `ODS vs Otsu vs DQN vs PPO`로 구성하고, OIS는 별도의 oracle upper-bound 표 또는 reference row로 분리하는 것이 가장 보수적이다. 다만 Table VI처럼 대표 성능표 하나로 정리해야 한다면, OIS를 reference column으로 포함하되 Otsu는 `GT-free per-image adaptive threshold baseline`, OIS는 `GT-aware oracle upper bound`라는 역할 차이를 caption 또는 note에서 분명히 밝혀야 한다. 또한 threshold 자체 비교는 ODS의 단일 threshold, Otsu와 OIS의 이미지별 threshold 분포, 그리고 RL 정책이 저장한 threshold trace를 같은 문맥에서 함께 해석해야 한다.
+
+seed 평균 표에 OIS나 Otsu를 포함할 때는 표준편차의 기준을 섞지 않는 것이 중요하다. DQN/PPO의 `mean ± std`는 일반적으로 5개 random seed에 대한 seed-wise 평균과 표준편차를 뜻한다. 반면 ODS, Otsu, OIS는 모두 고정된 200-image test set에 대해 deterministic하게 계산되는 reference 값이므로 동일한 의미의 seed-wise 표준편차가 존재하지 않는다. 따라서 `Table VI`와 같은 seed-aggregate 표에서는 다음 원칙을 권장한다.
+
+- ODS: 단일값으로 표기
+- Otsu: 단일값으로 표기
+- OIS: 단일값으로 표기
+- DQN/PPO: `mean ± std across five random seeds`로 표기
+
+만약 OIS나 Otsu의 이미지 간 변동성까지 보여주고 싶다면, 그것은 seed-wise std가 아니라 `200 test images`에 대한 image-wise std이므로 별도 note나 별도 표에서 분리해서 설명해야 한다. 즉, OIS를 `0.7728 ± 0.0819`, Otsu를 `0.7367 ± 0.0901`처럼 쓸 수는 있지만, 이 표기는 `across five random seeds`가 아니라 `across 200 test images`라는 점을 명시해야 한다.
+
+현재 프로젝트에서 이 권장 표기 규칙에 맞춘 논문 초안은 아래 산출물에 정리했다.
+
+- `runs/paper_compare/table_vi_with_ois_draft.md`: OIS와 Otsu를 함께 반영한 수정 Table VI 초안
+- `runs/paper_compare/table_vi_with_otsu_summary.csv`: Table VI용 핵심 수치 CSV
+
+현재 프로젝트에는 `scripts/build_paper_comparison.py` 가 추가되어 있으며, 아래 세 가지 산출물을 생성한다.
+
+- `runs/paper_compare/method_comparison_summary.csv`: ODS, Otsu, OIS, DQN, PPO 방법 수준 비교표
+- `runs/paper_compare/method_comparison_summary.md`: 논문 초안에 바로 붙일 수 있는 Markdown 표
+- `runs/paper_compare/test_sample_metric_compare_full.csv`: test split 샘플별 ODS, OIS, DQN, PPO metric 비교표
+
 ### 4.1 환경 설계
 
 - OpenAI Gym 계열 인터페이스 사용

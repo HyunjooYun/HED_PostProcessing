@@ -107,6 +107,9 @@ def evaluate_model(model_path: Path, dataset: BipedDataset, algorithm: str, bina
     for episode_index in range(len(dataset)):
         reward_history: list[float] = []
         threshold_history = [float(reset_info["params"]["threshold"])]
+        blur_sigma_history = [float(reset_info["params"]["blur_sigma"])]
+        morphology_radius_history = [float(reset_info["params"]["morphology_radius"])]
+        nms_strength_history = [float(reset_info["params"]["nms_strength"])]
         done = False
         truncated = False
         final_info = reset_info
@@ -115,6 +118,9 @@ def evaluate_model(model_path: Path, dataset: BipedDataset, algorithm: str, bina
             observation, reward, done, truncated, final_info = env.step(int(action))
             reward_history.append(float(reward))
             threshold_history.append(float(final_info["params"]["threshold"]))
+            blur_sigma_history.append(float(final_info["params"]["blur_sigma"]))
+            morphology_radius_history.append(float(final_info["params"]["morphology_radius"]))
+            nms_strength_history.append(float(final_info["params"]["nms_strength"]))
 
         sample = env.sample
         processed = env.processed_map
@@ -126,6 +132,9 @@ def evaluate_model(model_path: Path, dataset: BipedDataset, algorithm: str, bina
 
         rewards = np.asarray(reward_history, dtype=np.float32)
         thresholds = np.asarray(threshold_history, dtype=np.float32)
+        blur_sigmas = np.asarray(blur_sigma_history, dtype=np.float32)
+        morphology_radii = np.asarray(morphology_radius_history, dtype=np.float32)
+        nms_strengths = np.asarray(nms_strength_history, dtype=np.float32)
         metrics = final_info["metrics"]
         rows.append(
             {
@@ -139,6 +148,18 @@ def evaluate_model(model_path: Path, dataset: BipedDataset, algorithm: str, bina
                 "threshold_final": float(thresholds[-1]),
                 "threshold_mean": float(thresholds.mean()),
                 "threshold_std": float(thresholds.std()),
+                "blur_sigma_initial": float(blur_sigmas[0]),
+                "blur_sigma_final": float(blur_sigmas[-1]),
+                "blur_sigma_mean": float(blur_sigmas.mean()),
+                "blur_sigma_std": float(blur_sigmas.std()),
+                "morphology_radius_initial": float(morphology_radii[0]),
+                "morphology_radius_final": float(morphology_radii[-1]),
+                "morphology_radius_mean": float(morphology_radii.mean()),
+                "morphology_radius_std": float(morphology_radii.std()),
+                "nms_strength_initial": float(nms_strengths[0]),
+                "nms_strength_final": float(nms_strengths[-1]),
+                "nms_strength_mean": float(nms_strengths.mean()),
+                "nms_strength_std": float(nms_strengths.std()),
                 "precision": float(metrics["precision"]),
                 "recall": float(metrics["recall"]),
                 "f1": float(metrics["f1"]),
@@ -163,6 +184,12 @@ def summarize_policy(rows: list[dict[str, object]], algorithm: str) -> dict[str,
         "steps",
         "threshold_mean",
         "threshold_std",
+        "blur_sigma_mean",
+        "blur_sigma_std",
+        "morphology_radius_mean",
+        "morphology_radius_std",
+        "nms_strength_mean",
+        "nms_strength_std",
         "boundary_f1",
         "iou",
         "f1",
@@ -275,6 +302,15 @@ def main() -> None:
                 "dqn_threshold_mean": dqn["threshold_mean"],
                 "dqn_threshold_std": dqn["threshold_std"],
                 "dqn_threshold_final": dqn["threshold_final"],
+                "dqn_blur_sigma_mean": dqn["blur_sigma_mean"],
+                "dqn_blur_sigma_std": dqn["blur_sigma_std"],
+                "dqn_blur_sigma_final": dqn["blur_sigma_final"],
+                "dqn_morphology_radius_mean": dqn["morphology_radius_mean"],
+                "dqn_morphology_radius_std": dqn["morphology_radius_std"],
+                "dqn_morphology_radius_final": dqn["morphology_radius_final"],
+                "dqn_nms_strength_mean": dqn["nms_strength_mean"],
+                "dqn_nms_strength_std": dqn["nms_strength_std"],
+                "dqn_nms_strength_final": dqn["nms_strength_final"],
                 "dqn_boundary_f1": dqn["boundary_f1"],
                 "dqn_iou": dqn["iou"],
                 "ppo_reward_mean": ppo["reward_mean"],
@@ -283,6 +319,15 @@ def main() -> None:
                 "ppo_threshold_mean": ppo["threshold_mean"],
                 "ppo_threshold_std": ppo["threshold_std"],
                 "ppo_threshold_final": ppo["threshold_final"],
+                "ppo_blur_sigma_mean": ppo["blur_sigma_mean"],
+                "ppo_blur_sigma_std": ppo["blur_sigma_std"],
+                "ppo_blur_sigma_final": ppo["blur_sigma_final"],
+                "ppo_morphology_radius_mean": ppo["morphology_radius_mean"],
+                "ppo_morphology_radius_std": ppo["morphology_radius_std"],
+                "ppo_morphology_radius_final": ppo["morphology_radius_final"],
+                "ppo_nms_strength_mean": ppo["nms_strength_mean"],
+                "ppo_nms_strength_std": ppo["nms_strength_std"],
+                "ppo_nms_strength_final": ppo["nms_strength_final"],
                 "ppo_boundary_f1": ppo["boundary_f1"],
                 "ppo_iou": ppo["iou"],
             }
