@@ -7,7 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
-from .evaluation import EvaluationRow, PolicyEvaluationRow
+from .evaluation import EvaluationRow, OfflineEvaluationRow, PolicyEvaluationRow
 
 
 ALGORITHM_COLORS: dict[str, str] = {
@@ -126,6 +126,24 @@ def write_policy_rows_csv(rows: list[PolicyEvaluationRow], path: Path) -> None:
                     row.iou,
                 ]
             )
+
+
+def write_offline_rows_csv(rows: list[OfflineEvaluationRow], path: Path) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    param_names = ("threshold", "blur_sigma", "morphology_radius", "nms_strength")
+    header = ["sample_id", "steps"]
+    for name in param_names:
+        header += [f"{name}_initial", f"{name}_final", f"{name}_mean", f"{name}_std"]
+    header += ["precision", "recall", "f1", "boundary_f1", "iou"]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.writer(handle)
+        writer.writerow(header)
+        for row in rows:
+            values: list[float | int | str] = [row.sample_id, row.steps]
+            for name in param_names:
+                values += [row.params_initial[name], row.params_final[name], row.params_mean[name], row.params_std[name]]
+            values += [row.precision, row.recall, row.f1, row.boundary_f1, row.iou]
+            writer.writerow(values)
 
 
 def write_metric_records_csv(records: list[dict[str, float | str]], path: Path) -> None:

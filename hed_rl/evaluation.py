@@ -1,16 +1,90 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
 
-from .config import ParameterState
-from .data import DatasetIndex
+from .config import ParameterState, PostProcessConfig
+from .data import DatasetIndex, load_gt_map, load_image
 from .env import HEDEdgeEnv
 from .inference import load_model
 from .metrics import boundary_f1_score, iou_score, precision_recall_f1
 from .postprocess import run_postprocess
+
+PARAM_NAMES = ("threshold", "blur_sigma", "morphology_radius", "nms_strength")
+
+
+@dataclass(slots=True)
+class OfflineEvaluationRow:
+    sample_id: str
+    steps: int
+    params_initial: dict[str, float]
+    params_final: dict[str, float]
+    params_mean: dict[str, float]
+    params_std: dict[str, float]
+    precision: float
+    recall: float
+    f1: float
+    boundary_f1: float
+    iou: float
+
+
+def evaluate_saved_outputs(
+    inference_dir: Path,
+    inputs_dir: Path,
+    split: str,
+    boundary_tolerance: float | None = None,
+) -> list[OfflineEvaluationRow]:
+    """Score previously saved GT-free inference outputs. This is the only place GT is read."""
+    tolerance = PostProcessConfig().boundary_tolerance if boundary_tolerance is None else boundary_tolerance
+    trajectories = json.loads((inference_dir / "params_trajectory.json").read_text(encoding="utf-8"))
+    rows: list[OfflineEvaluationRow] = []
+    for sample_id, history in trajectories.items():
+        prediction = load_image(inference_dir / "edge_maps" / f"{sample_id}.png", grayscale=True)
+        gt = load_gt_map(inputs_dir, split, sample_id)
+        precision, recall, f1 = precision_recall_f1(prediction, gt)
+        _, _, boundary_f1 = boundary_f1_score(prediction, gt, tolerance=tolerance)
+        iou = iou_score(prediction, gt)
+        series = {name: np.asarray([float(state[name]) for state in history], dtype=np.float32) for name in PARAM_NAMES}
+        rows.append(
+            OfflineEvaluationRow(
+                sample_id=sample_id,
+                steps=len(history) - 1,
+                params_initial={name: float(values[0]) for name, values in series.items()},
+                params_final={name: float(values[-1]) for name, values in series.items()},
+                params_mean={name: float(values.mean()) for name, values in series.items()},
+                params_std={name: float(values.std()) for name, values in series.items()},
+                precision=precision,
+                recall=recall,
+                f1=f1,
+                boundary_f1=boundary_f1,
+                iou=iou,
+            )
+        )
+    return rows
+
+
+def summarize_offline_rows(rows: list[OfflineEvaluationRow]) -> dict[str, float]:
+    if not rows:
+        return {"count": 0.0}
+    summary: dict[str, float] = {"count": float(len(rows))}
+    getters = {
+        "steps": lambda row: row.steps,
+        **{f"{name}_mean": (lambda row, n=name: row.params_mean[n]) for name in PARAM_NAMES},
+        **{f"{name}_std": (lambda row, n=name: row.params_std[n]) for name in PARAM_NAMES},
+        "precision": lambda row: row.precision,
+        "recall": lambda row: row.recall,
+        "f1": lambda row: row.f1,
+        "boundary_f1": lambda row: row.boundary_f1,
+        "iou": lambda row: row.iou,
+    }
+    for metric_name, getter in getters.items():
+        values = np.asarray([float(getter(row)) for row in rows], dtype=np.float32)
+        summary[f"{metric_name}_mean"] = float(values.mean())
+        summary[f"{metric_name}_std"] = float(values.std())
+    return summary
 
 
 @dataclass(slots=True)

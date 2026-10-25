@@ -1,15 +1,17 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
+from PIL import Image
 from stable_baselines3 import DQN, PPO
 
 from .config import ExperimentConfig, PostProcessConfig
-from .data import DatasetIndex, Sample
-from .env import HEDEdgeEnv
+from .data import DatasetIndex, InferenceDatasetIndex, Sample
+from .env import HEDEdgeEnv, HEDInferenceEnv
 
 
 @dataclass(slots=True)
@@ -21,6 +23,62 @@ class EpisodeArtifact:
     f1: float
     boundary_f1: float
     iou: float
+
+
+@dataclass(slots=True)
+class InferenceResult:
+    sample_id: str
+    steps: int
+    processed: np.ndarray
+    params_history: list[dict[str, float]]
+
+
+def run_policy_inference(model, dataset: InferenceDatasetIndex, postprocess_config: PostProcessConfig, progress_every: int | None = None) -> list[InferenceResult]:
+    """Run the policy for a fixed number of steps per image without touching GT."""
+    env = HEDInferenceEnv(dataset, postprocess_config)
+    results: list[InferenceResult] = []
+    observation, info = env.reset()
+    for episode_index in range(len(dataset)):
+        params_history = [dict(info["params"])]
+        truncated = False
+        final_info = info
+        steps = 0
+        while not truncated:
+            action, _ = model.predict(observation, deterministic=True)
+            observation, _, _, truncated, final_info = env.step(int(action))
+            params_history.append(dict(final_info["params"]))
+            steps += 1
+        processed = env.processed_map
+        if processed is None:
+            raise RuntimeError("Inference environment did not expose a final edge map")
+        results.append(
+            InferenceResult(
+                sample_id=str(final_info["sample_id"]),
+                steps=steps,
+                processed=processed.copy(),
+                params_history=params_history,
+            )
+        )
+        if progress_every and ((episode_index + 1) % progress_every == 0 or episode_index + 1 == len(dataset)):
+            print(f"[infer] {episode_index + 1}/{len(dataset)} sample={final_info['sample_id']}")
+        if episode_index + 1 < len(dataset):
+            observation, info = env.reset()
+    return results
+
+
+def save_inference_outputs(results: list[InferenceResult], output_dir: Path) -> None:
+    """Persist final edge maps and parameter trajectories. No metrics, no GT."""
+    maps_dir = output_dir / "edge_maps"
+    maps_dir.mkdir(parents=True, exist_ok=True)
+    trajectories: dict[str, list[dict[str, float]]] = {}
+    for result in results:
+        Image.fromarray((result.processed > 0.5).astype(np.uint8) * 255, mode="L").save(maps_dir / f"{result.sample_id}.png")
+        trajectories[result.sample_id] = result.params_history
+    (output_dir / "params_trajectory.json").write_text(json.dumps(trajectories), encoding="utf-8")
+    (output_dir / "inference_manifest.json").write_text(
+        json.dumps({"count": len(results), "sample_ids": [r.sample_id for r in results], "steps": sorted({r.steps for r in results})}, indent=2),
+        encoding="utf-8",
+    )
 
 
 def load_model(model_path: Path):

@@ -87,6 +87,19 @@ Export 10 sample images from a trained model:
 & ".venv/Scripts/python.exe" .\main.py export-samples --model-path runs\dqn_main\dqn_final.zip --split test --num-samples 10 --output-dir runs\dqn_main\samples
 ```
 
+GT-free inference and offline evaluation. `infer-model` never reads `GT_map` (fixed 30 steps, no reward); `evaluate-outputs` loads GT only afterwards. `evaluate-model` runs both stages:
+
+```powershell
+& ".venv/Scripts/python.exe" .\main.py infer-model --model-path runs\dqn_main\dqn_final.zip --split test --output-dir runs\dqn_main\infer_test
+& ".venv/Scripts/python.exe" .\main.py evaluate-outputs --inference-dir runs\dqn_main\infer_test --split test
+```
+
+Verify GT-independence (inference without GT, identical outputs with/without GT, no `GT_map` access during inference, optional comparison with an existing rows CSV):
+
+```powershell
+& ".venv/Scripts/python.exe" .\scripts\verify_gt_free_inference.py --model-path runs\dqn_main\dqn_final.zip --reference-rows runs\dqn_main\test_eval\test_rows.csv
+```
+
 Generate shared DQN/PPO comparison graphs for the same metrics:
 
 ```powershell

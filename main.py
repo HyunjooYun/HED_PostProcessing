@@ -5,13 +5,13 @@ import json
 from pathlib import Path
 
 from hed_rl.config import ExperimentConfig, ParameterState, PostProcessConfig
-from hed_rl.data import DatasetIndex
-from hed_rl.evaluation import evaluate_fixed_threshold, evaluate_policy_model, summarize_policy_rows, summarize_rows
-from hed_rl.inference import export_policy_samples
+from hed_rl.data import DatasetIndex, InferenceDatasetIndex
+from hed_rl.evaluation import evaluate_fixed_threshold, evaluate_saved_outputs, summarize_offline_rows, summarize_rows
+from hed_rl.inference import export_policy_samples, load_model, run_policy_inference, save_inference_outputs
 from hed_rl.ois import export_ois_binary_maps, summarize_ois_thresholds, write_ois_thresholds_csv
 from hed_rl.ods import build_threshold_grid, export_ods_binary_maps, select_ods_threshold, write_export_manifest, write_ods_sweep_csv
 from hed_rl.otsu import export_otsu_binary_maps, summarize_otsu_thresholds, write_otsu_thresholds_csv
-from hed_rl.reporting import read_metric_records_csv, write_compare_metric_plot, write_eval_plots, write_metric_records_csv, write_policy_rows_csv, write_rows_csv, write_summary_plot, write_training_plots, merge_metric_records
+from hed_rl.reporting import read_metric_records_csv, write_compare_metric_plot, write_eval_plots, write_metric_records_csv, write_offline_rows_csv, write_rows_csv, write_summary_plot, write_training_plots, merge_metric_records
 from hed_rl.training import train_model
 
 
@@ -33,10 +33,23 @@ def build_parser() -> argparse.ArgumentParser:
     train.add_argument("--run-name", default=None)
     train.add_argument("--seed", type=int, default=42)
 
-    evaluate = subparsers.add_parser("evaluate-model", help="Evaluate a trained DQN or PPO model on a dataset split")
+    evaluate = subparsers.add_parser(
+        "evaluate-model",
+        help="GT-free inference followed by offline GT evaluation of a trained DQN or PPO model",
+    )
     evaluate.add_argument("--model-path", required=True)
     evaluate.add_argument("--split", default="test", choices=["train", "val", "test"])
     evaluate.add_argument("--output-dir", required=True)
+
+    infer = subparsers.add_parser("infer-model", help="GT-free inference: saves final edge maps and parameter trajectories")
+    infer.add_argument("--model-path", required=True)
+    infer.add_argument("--split", default="test", choices=["train", "val", "test"])
+    infer.add_argument("--output-dir", required=True)
+
+    eval_outputs = subparsers.add_parser("evaluate-outputs", help="Offline GT evaluation of saved inference outputs")
+    eval_outputs.add_argument("--inference-dir", required=True)
+    eval_outputs.add_argument("--split", default="test", choices=["train", "val", "test"])
+    eval_outputs.add_argument("--output-dir", default=None)
 
     compare = subparsers.add_parser("compare-runs", help="Compare saved DQN and PPO training/evaluation CSV logs")
     compare.add_argument("--dqn-run-dir", required=True)
@@ -238,18 +251,32 @@ def run_export_otsu_binary(args: argparse.Namespace) -> None:
     print(json.dumps(export_payload, indent=2))
 
 
-def run_evaluate_model(args: argparse.Namespace) -> None:
+def run_infer_model(args: argparse.Namespace) -> None:
     config = ExperimentConfig()
-    dataset = DatasetIndex(config.inputs_dir, args.split)
-    rows = evaluate_policy_model(Path(args.model_path), dataset, PostProcessConfig(), progress_every=10)
-    summary = summarize_policy_rows(rows)
+    dataset = InferenceDatasetIndex(config.inputs_dir, args.split)
+    model = load_model(Path(args.model_path))
+    results = run_policy_inference(model, dataset, PostProcessConfig(), progress_every=10)
+    save_inference_outputs(results, Path(args.output_dir))
+    print(f"Saved {len(results)} GT-free outputs to {args.output_dir}")
 
-    output_dir = Path(args.output_dir)
+
+def run_evaluate_outputs(args: argparse.Namespace) -> None:
+    config = ExperimentConfig()
+    inference_dir = Path(args.inference_dir)
+    output_dir = Path(args.output_dir) if args.output_dir else inference_dir
+    rows = evaluate_saved_outputs(inference_dir, config.inputs_dir, args.split)
+    summary = summarize_offline_rows(rows)
     output_dir.mkdir(parents=True, exist_ok=True)
-    write_policy_rows_csv(rows, output_dir / f"{args.split}_rows.csv")
+    write_offline_rows_csv(rows, output_dir / f"{args.split}_rows.csv")
     write_summary_plot(summary, output_dir / f"{args.split}_summary.png", title=f"Policy evaluation {args.split}")
     (output_dir / f"{args.split}_summary.json").write_text(json.dumps(summary, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
+
+
+def run_evaluate_model(args: argparse.Namespace) -> None:
+    run_infer_model(args)
+    args.inference_dir = args.output_dir
+    run_evaluate_outputs(args)
 
 
 def run_compare_runs(args: argparse.Namespace) -> None:
@@ -298,6 +325,10 @@ def main() -> None:
         run_export_otsu_binary(args)
     elif args.command == "evaluate-model":
         run_evaluate_model(args)
+    elif args.command == "infer-model":
+        run_infer_model(args)
+    elif args.command == "evaluate-outputs":
+        run_evaluate_outputs(args)
     elif args.command == "compare-runs":
         run_compare_runs(args)
 

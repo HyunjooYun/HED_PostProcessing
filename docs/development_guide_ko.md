@@ -28,6 +28,63 @@
 - `runs/all_seed_test_summary.md`
 - `runs/paper_seed486_summary.md`
 
+### 1.1.1 업데이트 (2026-10-25): GT-free 추론 경로 분리
+
+#### 배경
+
+기존 평가 경로는 `HEDEdgeEnv`를 그대로 사용했다. 이 환경은 `step()` 마다 GT와 비교한 `boundary_f1`을 reward로 반환하고, `boundary_f1 >= 0.98` 이면 에피소드를 조기 종료한다. 정책의 observation에는 GT가 포함되지 않지만(`features.py`는 HED map, 후처리 결과, 파라미터만 사용), 종료 시점이 GT 점수에 의해 결정될 수 있으므로 test 추론이 엄밀한 의미에서 GT-free라고 보장되지 않았다.
+
+기존 test 평가 결과(13개 run, 각 200 에피소드)에서는 조기 종료가 한 번도 발생하지 않았고 모든 에피소드가 30 step을 수행했다. 따라서 이번 변경은 보고된 수치를 바꾸지 않고, 추론이 GT에 의존하지 않는다는 점을 구조적으로 보장하기 위한 것이다.
+
+#### 변경 사항
+
+| 파일 | 변경 내용 |
+|---|---|
+| `hed_rl/data.py` | GT를 나열하거나 열지 않는 `InferenceDatasetIndex`, `discover_inference_split()` 추가. GT는 오프라인 평가 전용 `load_gt_map()` 으로만 로드 |
+| `hed_rl/env.py` | GT 없는 `HEDInferenceEnv` 추가. 전이와 observation은 `HEDEdgeEnv`와 동일, reward는 항상 `0.0`, 종료는 `max_episode_steps`(30) 고정. 학습용 `HEDEdgeEnv`는 변경 없음 |
+| `hed_rl/inference.py` | `run_policy_inference()`, `save_inference_outputs()`, `InferenceResult` 추가. 최종 edge map과 파라미터 궤적만 저장 |
+| `hed_rl/evaluation.py` | 저장된 추론 결과를 읽어 GT와 비교하는 `evaluate_saved_outputs()`, `summarize_offline_rows()`, `OfflineEvaluationRow` 추가 |
+| `hed_rl/reporting.py` | `write_offline_rows_csv()` 추가 |
+| `main.py` | `infer-model`, `evaluate-outputs` 명령 추가. `evaluate-model`은 두 단계를 순차 실행하도록 변경 |
+| `scripts/verify_gt_free_inference.py` | GT-free 검증 스크립트 신규 추가 |
+
+#### 동작 방식
+
+```text
+[추론 단계 - GT 접근 없음]
+images + HED_map -> InferenceDatasetIndex -> HEDInferenceEnv (30 step 고정, reward 0)
+                 -> edge_maps/{sample_id}.png, params_trajectory.json, inference_manifest.json
+
+[오프라인 평가 단계 - 추론 종료 후에만 GT 로드]
+저장된 edge_maps + GT_map -> evaluate_saved_outputs -> {split}_rows.csv, {split}_summary.json/png
+```
+
+- 최종 출력은 항상 30 step 이후의 마지막 상태이며, 최고 reward 시점의 map을 고르는 로직은 추론 경로에 없다.
+- 추론 경로에서 reward는 사용하지 않으므로 평가 CSV에서 `reward` 열을 제거했다. 평가 CSV의 기존 열 중 `reward`를 제외한 나머지 열 이름은 유지된다.
+- 학습과 학습 중 validation 평가(`training.py`, `tracking.py`)는 의도적으로 GT 기반 reward를 유지한다.
+
+#### 검증 결과
+
+`scripts/verify_gt_free_inference.py` 를 test split 200장, 체크포인트 12개(DQN, PPO 각각 seed 24/42/123/486/999의 `best_model` 및 seed 486 `test_eval` 대응 `final` 모델)에 대해 실행했고 모두 통과했다.
+
+| 검사 | 결과 |
+|---|---|
+| GT_map이 없는 입력 사본에서 추론 | 200/200 성공, 전 에피소드 30 step |
+| GT 유무에 따른 edge map 및 파라미터 궤적 | 불일치 0건 |
+| 추론 중 `GT_map` 접근(`sys.addaudithook`으로 open, listdir, scandir, stat 감시) | 0건 |
+| 오프라인 평가 중 `GT_map` 접근 | 감지됨(감사 훅이 실제로 동작함을 확인하는 대조군) |
+| 기존 결과 CSV와 비교(precision, recall, f1, boundary_f1, iou, steps 및 가능한 경우 파라미터 final/mean) | 최대 절대 오차 약 `1e-16` |
+
+- `main.py evaluate-model` CLI를 직접 실행해, 결과 CSV에 `reward` 열이 없고 f1, boundary_f1, iou가 기존 결과와 정확히 일치함을 확인했다.
+- 기존 `internal_test_param_*` CSV는 `best_model` 체크포인트에서, `*_seed486_sqrt8/test_eval` CSV는 `*_final` 체크포인트에서 생성된 결과이므로 동일 체크포인트끼리 비교했다.
+- `test_eval` CSV는 파라미터 열이 없는 이전 포맷이므로 해당 비교는 지표와 step 수만 대상으로 했다.
+
+#### 남은 한계
+
+- `scripts/evaluate_biped_models.py` 와 `export-samples`(`export_policy_samples`)는 아직 GT를 사용하는 `HEDEdgeEnv`를 사용한다. BIPED 결과와 정성 샘플에도 GT-free를 주장하려면 같은 방식으로 이전해야 한다.
+- 학습 중 val reward로 `best_model`을 선택하므로, 모델 선택 단계에는 val GT가 사용된다. 논문에는 이 점을 명시해야 한다.
+- 검증 스크립트는 프로젝트 가상환경(`.venv\Scripts\python.exe`)으로 실행해야 한다.
+
 ## 2. 프로젝트 목표
 
 1차 목표는 HED edge map에서 ODS 기반 단일 threshold를 추정해 안정적인 binary edge map을 생성하는 모듈을 구축하는 것이다.
@@ -546,6 +603,8 @@ hed_rl/
   postprocess.py
   reporting.py
   training.py
+scripts/
+  verify_gt_free_inference.py   # 2026-10-25 추가
 ```
 
 모듈별 역할은 다음과 같다.
@@ -559,6 +618,9 @@ CLI 진입점이다.
 - `baseline`
 - `train`
 - `export-samples`
+- `evaluate-model` (2026-10-25 변경: GT-free 추론 후 오프라인 평가를 순차 실행)
+- `infer-model` (2026-10-25 추가: GT-free 추론만 수행)
+- `evaluate-outputs` (2026-10-25 추가: 저장된 추론 결과를 GT로 오프라인 평가)
 
 ### 5.2 `hed_rl/config.py`
 
@@ -586,6 +648,8 @@ CLI 진입점이다.
 - split별 샘플 자동 매칭
 - RGB 입력 이미지 로딩
 - HED, GT grayscale 로딩
+- (2026-10-25) GT-free 추론용 `InferenceDatasetIndex`: image와 HED map만 매칭하며 `GT_map` 경로를 열거나 조회하지 않는다.
+- (2026-10-25) `load_gt_map()`: 오프라인 평가 단계에서만 호출하는 GT 로더다.
 
 ### 5.4 `hed_rl/postprocess.py`
 
@@ -636,6 +700,16 @@ Gymnasium 환경 구현이다.
 
 - `boundary_f1 >= 0.98`
 - 또는 `max_episode_steps == 30`
+
+위 reward와 종료 조건은 학습용 `HEDEdgeEnv` 기준이다.
+
+(2026-10-25) 추론용으로 `HEDInferenceEnv`를 분리했다.
+
+- `InferenceDatasetIndex`를 사용하므로 GT를 로드하지 않는다.
+- observation과 후처리 전이는 `HEDEdgeEnv`와 동일하다.
+- reward는 항상 `0.0` 이며, `terminated` 는 항상 `False` 다.
+- 에피소드는 `max_episode_steps`(30) 에 도달했을 때만 `truncated` 로 끝난다.
+- `step()` 의 `info` 에는 `sample_id`, `action_name`, `params` 만 담고 `metrics` 는 포함하지 않는다.
 
 ### 5.8 `hed_rl/training.py`
 
@@ -761,6 +835,13 @@ CSV 저장 원칙은 다음과 같다.
 
 현재는 고정 파라미터 baseline 평가를 담당한다.
 
+(2026-10-25) 추가된 오프라인 평가 함수는 다음과 같다.
+
+- `evaluate_saved_outputs(inference_dir, inputs_dir, split)`: 저장된 edge map과 `params_trajectory.json` 을 읽고, 이 시점에 처음으로 GT를 로드해 precision, recall, f1, boundary_f1, iou를 계산한다.
+- `summarize_offline_rows(rows)`: 지표와 파라미터 평균/표준편차 요약. 추론 단계에는 reward가 없으므로 reward 항목은 포함하지 않는다.
+
+기존 `evaluate_policy_episodes`, `evaluate_policy_model` 등은 학습 중 val 평가(`tracking.py`)에서 계속 사용하므로 그대로 유지한다.
+
 개발 우선순위 기준으로는 ODS threshold sweep과 binary edge map export 기능까지 이 모듈 또는 별도 ODS 전용 모듈로 확장하는 것이 다음 단계다.
 
 ### 5.10 `hed_rl/inference.py`
@@ -773,6 +854,12 @@ CSV 저장 원칙은 다음과 같다.
 - HED
 - GT
 - policy output
+
+(2026-10-25) GT-free 추론 기능이 추가되었다.
+
+- `run_policy_inference(model, dataset, postprocess_config)`: `HEDInferenceEnv` 로 이미지마다 30 step을 고정 수행하고 `InferenceResult` 목록을 반환한다.
+- `save_inference_outputs(results, output_dir)`: `edge_maps/{sample_id}.png`(0/255 binary), `params_trajectory.json`, `inference_manifest.json` 을 저장한다.
+- `export_policy_samples` 는 정성 그림에 GT 패널을 표시하므로 여전히 `HEDEdgeEnv`를 사용한다.
 
 ### 5.11 `hed_rl/reporting.py`
 
@@ -840,6 +927,36 @@ CSV, JSON, PNG 요약 리포트를 저장한다.
 ```powershell
 & ".venv/Scripts/python.exe" .\main.py export-samples --model-path runs\dqn_main\dqn_final.zip --split test --num-samples 10 --output-dir runs\dqn_main\samples
 ```
+
+### 6.4.1 GT-free 추론 및 오프라인 평가 (2026-10-25)
+
+추론과 평가를 단계별로 실행한다.
+
+```powershell
+& ".venv/Scripts/python.exe" .\main.py infer-model --model-path runs\dqn_main\dqn_final.zip --split test --output-dir runs\dqn_main\infer_test
+& ".venv/Scripts/python.exe" .\main.py evaluate-outputs --inference-dir runs\dqn_main\infer_test --split test
+```
+
+두 단계를 한 번에 실행하려면 다음 명령을 사용한다.
+
+```powershell
+& ".venv/Scripts/python.exe" .\main.py evaluate-model --model-path runs\dqn_main\dqn_final.zip --split test --output-dir runs\dqn_main\test_eval
+```
+
+출력 파일:
+
+- `edge_maps/{sample_id}.png`, `params_trajectory.json`, `inference_manifest.json` (추론 단계)
+- `test_rows.csv`, `test_summary.json`, `test_summary.png` (오프라인 평가 단계, `reward` 열 없음)
+
+GT 독립성 검증:
+
+```powershell
+& ".venv/Scripts/python.exe" .\scripts\verify_gt_free_inference.py --model-path runs\dqn_main\dqn_final.zip --reference-rows runs\dqn_main\test_eval\test_rows.csv
+```
+
+- `--limit N` 으로 앞 N장만 사용하는 smoke test를 할 수 있다.
+- `--reference-rows` 에는 이전 파이프라인의 `*_rows.csv` 를 지정하며, 두 CSV에 공통으로 있는 열만 비교한다.
+- 검사에 실패하면 종료 코드 `1` 을 반환한다.
 
 ### 6.5 학습 결과 비교 리포트
 
@@ -991,8 +1108,13 @@ PPO 안정성 리포트 해석 규칙은 다음과 같다.
 - baseline 평가 및 리포트 저장 구현
 - 샘플 이미지 저장 구현
 - 고정 threshold 기반 baseline 평가 경로 확보
+- (2026-10-25) GT-free 추론 데이터셋/환경/추론 함수 구현
+- (2026-10-25) 추론과 오프라인 평가 분리 및 `infer-model`, `evaluate-outputs` CLI 추가
+- (2026-10-25) GT-free 검증 스크립트 구현
 
 ### 8.2 검증된 항목
+
+- (2026-10-25) GT 파일 없이 test 200장 추론 성공, GT 유무에 따른 출력 동일, 추론 중 `GT_map` 접근 0건, 기존 결과 CSV와 최대 오차 약 `1e-16` (체크포인트 12개)
 
 - baseline 평가 smoke test
 - DQN smoke train
@@ -1027,6 +1149,8 @@ DQN, PPO 관련 현재 확인 범위는 다음과 같다.
 - 기획서 수준의 엄밀한 BPR 구현
 - DQN, PPO, fixed threshold의 일괄 비교 평가 스크립트
 - 결과 비교용 통합 문서 생성
+- BIPED 평가 스크립트(`scripts/evaluate_biped_models.py`)와 `export-samples` 의 GT-free 경로 이전
+- 학습 중 `best_model` 선택에 val GT reward를 사용한다는 점의 논문 명시
 
 ## 9. 설계 결정 사항
 
@@ -1116,6 +1240,8 @@ DQN, PPO 관련 현재 확인 범위는 다음과 같다.
 - 각 그래프는 반드시 대응하는 CSV source 데이터와 함께 저장해야 재현성과 재도식화가 가능하다.
 - 평가 로그도 학습 로그와 동일하게 `200,000 timesteps`, `1,000 timestep` 간격 기준을 유지해야 비교가 일관된다.
 - TensorBoard와 정적 CSV 결과를 함께 남겨야 재현성이 높아진다.
+- (2026-10-25) 추론 코드에 GT 로딩, GT 기반 reward, GT 기반 종료 조건을 넣지 않아야 한다. GT는 추론이 끝난 뒤 `evaluate-outputs` 단계에서만 읽는다.
+- (2026-10-25) 추론 경로를 수정한 뒤에는 `scripts/verify_gt_free_inference.py` 로 GT 독립성을 다시 검증해야 한다.
 
 ## 12. 결론
 

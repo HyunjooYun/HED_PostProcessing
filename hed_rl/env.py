@@ -7,7 +7,7 @@ import numpy as np
 from gymnasium import spaces
 
 from .config import ParameterState, PostProcessConfig
-from .data import DatasetIndex, Sample
+from .data import DatasetIndex, InferenceDatasetIndex, InferenceSample, Sample
 from .features import compute_observation_features
 from .metrics import boundary_f1_score, iou_score, precision_recall_f1
 from .postprocess import ACTIONS, apply_action, run_postprocess
@@ -33,6 +33,69 @@ class StepMetrics:
             "boundary_f1": self.boundary_f1,
             "iou": self.iou,
         }
+
+
+class HEDInferenceEnv(gym.Env[np.ndarray, int]):
+    """GT-free environment: same dynamics and observations as HEDEdgeEnv, but no GT access.
+
+    The reward is a constant 0.0 and an episode ends only after ``max_episode_steps`` steps,
+    so nothing in the rollout depends on ground truth.
+    """
+
+    metadata = {"render_modes": []}
+
+    def __init__(self, dataset: InferenceDatasetIndex, config: PostProcessConfig):
+        super().__init__()
+        self.dataset = dataset
+        self.config = config
+        self.action_space = spaces.Discrete(len(ACTIONS))
+        self.observation_space = spaces.Box(low=0.0, high=1.0, shape=(10,), dtype=np.float32)
+        self._current_index = -1
+        self._step_count = 0
+        self._params = ParameterState().clip()
+        self._sample: InferenceSample | None = None
+        self._processed: np.ndarray | None = None
+
+    def _observe(self) -> np.ndarray:
+        assert self._sample is not None
+        assert self._processed is not None
+        step_ratio = self._step_count / max(self.config.max_episode_steps, 1)
+        return compute_observation_features(self._sample.hed, self._processed, self._params, step_ratio)
+
+    def reset(self, *, seed: int | None = None, options: dict | None = None) -> tuple[np.ndarray, dict]:
+        super().reset(seed=seed)
+        self._step_count = 0
+        self._params = ParameterState().clip()
+        self._current_index = min(self._current_index + 1, len(self.dataset) - 1)
+        self._sample = self.dataset[self._current_index]
+        self._processed = run_postprocess(self._sample.hed, self._params)
+        info = {"sample_id": self._sample.sample_id, "params": self._params.to_dict()}
+        return self._observe(), info
+
+    def step(self, action: int) -> tuple[np.ndarray, float, bool, bool, dict]:
+        assert self._sample is not None
+        action_name = ACTIONS[action]
+        self._step_count += 1
+        self._params = apply_action(self._params, action_name, self.config)
+        self._processed = run_postprocess(self._sample.hed, self._params)
+        truncated = self._step_count >= self.config.max_episode_steps
+        info = {
+            "sample_id": self._sample.sample_id,
+            "action_name": action_name,
+            "params": self._params.to_dict(),
+        }
+        return self._observe(), 0.0, False, truncated, info
+
+    def restart_sequence(self) -> None:
+        self._current_index = -1
+
+    @property
+    def sample(self) -> InferenceSample | None:
+        return self._sample
+
+    @property
+    def processed_map(self) -> np.ndarray | None:
+        return self._processed
 
 
 class HEDEdgeEnv(gym.Env[np.ndarray, int]):
