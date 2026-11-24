@@ -1,0 +1,85 @@
+{
+  "scope": "In-memory HED score map to binary map; excludes HED network, input/output disk I/O, GT evaluation, checkpoint loading and offline ODS threshold selection.",
+  "dataset": "inputs test split",
+  "sample_count": 200,
+  "repeats": 5,
+  "image_shapes_height_width": {
+    "(321, 481)": 134,
+    "(481, 321)": 66
+  },
+  "warmup_images_per_method": 5,
+  "method_order": "rotated per image and repeat",
+  "device": "CPU",
+  "torch_threads": 1,
+  "torch_interop_threads": 1,
+  "python": "3.14.1 (tags/v3.14.1:57e0d17, Dec  2 2025, 14:05:07) [MSC v.1944 64 bit (AMD64)]",
+  "platform": "Windows-11-10.0.22631-SP0",
+  "torch": "2.11.0+cpu",
+  "numpy": "2.4.4",
+  "pillow": "12.2.0",
+  "stable_baselines3": "2.8.0",
+  "ods_threshold": 0.5,
+  "checkpoints": {
+    "DQN": "runs\\dqn_seed486_sqrt8\\dqn_final.zip",
+    "PPO": "runs\\ppo_seed486_sqrt8\\ppo_final.zip"
+  },
+  "validation": "Outputs match across all repeats; 200 baseline maps exactly match existing maps; policy F1 and IoU match existing seed-486 final-model test rows, 30 steps each.",
+  "results_ms": {
+    "HED-ODS": {
+      "mean": 0.09259710000000002,
+      "image_std_population_ddof_0": 0.008475815806752765,
+      "round_means": [
+        0.08503450000000001,
+        0.09345749999999999,
+        0.0972965,
+        0.0950435,
+        0.09215350000000001
+      ],
+      "round_mean_std_population_ddof_0": 0.004152089141624966,
+      "image_mean_min": 0.08108000000000001,
+      "image_mean_max": 0.13501999999999997
+    },
+    "HED-Otsu": {
+      "mean": 0.9657353999999999,
+      "image_std_population_ddof_0": 0.0788501345010901,
+      "round_means": [
+        0.9102075000000001,
+        0.959778,
+        0.9859654999999999,
+        0.9987655000000001,
+        0.9739605
+      ],
+      "round_mean_std_population_ddof_0": 0.030616123252952834,
+      "image_mean_min": 0.86852,
+      "image_mean_max": 1.47552
+    },
+    "DQN": {
+      "mean": 220.3548891,
+      "image_std_population_ddof_0": 2.907322629739463,
+      "round_means": [
+        214.89975149999998,
+        217.87305,
+        219.06145899999999,
+        226.630619,
+        223.309566
+      ],
+      "round_mean_std_population_ddof_0": 4.140191163170036,
+      "image_mean_min": 210.11096000000003,
+      "image_mean_max": 227.59808000000004
+    },
+    "PPO": {
+      "mean": 223.9480267,
+      "image_std_population_ddof_0": 2.5554261048923173,
+      "round_means": [
+        217.96858550000002,
+        221.69336800000002,
+        221.90305399999997,
+        231.399524,
+        226.775602
+      ],
+      "round_mean_std_population_ddof_0": 4.659165383425787,
+      "image_mean_min": 217.68249999999998,
+      "image_mean_max": 232.87526000000003
+    }
+  }
+}
